@@ -9,7 +9,7 @@
 #' R version 3.5.1
 #' Occurrence data source: [gbif](http://www.gbif.org)  
 #' Environmental data source: [worldclim](http://www.worldclim.org)  
-#' Algorithms: GAM, RF, MaxEnt
+#' Algorithms: GAM, RF
 #' 
 #' Overview
 #' ===============================
@@ -26,17 +26,10 @@
 #' - Model predictions
 #' 
 
+############################################################################################################
 #' Set working directory and load packages
-#' ==========================================
-#' Set the working directory. You have to use your own path.
 setwd("C:\\02_Studium\\02_Master\\02_Semester_2\\MET1_Spatial_modelling_and_prediction\\MET1_Modeling_Prediction\\caffea_arabica")
 
-
-#' Package rms provides function val.prob for evaluation of model performance; 
-#' load before raster to avoid name conflicts with mask (alternatively: use raster::mask, 
-#' i.e. explicitly specify that you want to use function mask from namespace raster)
-#' 
-#install.packages("rms")
 library(rms) 
 library(raster)
 library(mgcv) # gam
@@ -47,14 +40,12 @@ library(dismo)
 library(rgdal)
 library(ellipse)
 library(randomForest)
-#install.packages("rJava")
 library(rJava)
 library(XML)
 
+#################################################################################################################
 #' Import data: Environment and species occurrences
-#' ====================================================
 #' Import shape of the study area (Ethiopia)
-#' ----------------------------------
 
 study_area <- readOGR("./ethiopia_shp", "ETH_outline")
 plot(study_area)
@@ -103,7 +94,11 @@ biocrop <- crop(bio, extent(study_area) + 3)
 plot(raster(biocrop, 7))
 plot(study_area, add=TRUE)
 
+###########################################################################################################
+#' ==========================================
 #' Read occurrence points
+#' ==========================================
+
   # Download species location data from gbif
   # species <- gbif("Syncerus", "caffer", ext = extent(bio), sp = TRUE, removeZeros = TRUE)
   species0 <- gbif('Coffea arabica L.')
@@ -121,6 +116,8 @@ plot(raster(biocrop, 1))
 plot(study_area, add=TRUE)
 plot(species, add = TRUE)
 
+############################################################################################################
+#' ==============================
 #' Data preprocessing
 #' ==============================
 
@@ -137,8 +134,10 @@ plotcorr(cm, col=ifelse(abs(cm) > 0.7, "red", "grey"))
 #' ### Select an uncorrelated subset of environmental variables ###
 env <- subset(biocrop, c("bio1", "bio4", "bio5", "bio12", "bio14", "bio15"))
 
+############################################################################################################
+#' ==========================================
 #' Sampling of (pseudo-)absence points
-#' ====================================================
+#' ==========================================
 #' The function randomPoints in package dismo allows to 
 #' randomly select a certain number of random points,
 #' and to adjust the probability of selecting a cell
@@ -152,8 +151,7 @@ background <- randomPoints(env, 2000, species)
 #' Select only one presence record in each cell of the environmental layer
 presence <- gridSample(species, env, n = 1)
 
-#' 
-#' Now we combine the presence and background points, adding a 
+#' combining the presence and background points, adding a 
 #' column "species" that contains the information about presence (1)
 #' and background (0)
 fulldata <- SpatialPointsDataFrame(rbind(presence, background),
@@ -164,13 +162,16 @@ fulldata <- SpatialPointsDataFrame(rbind(presence, background),
 #' Add information of environmental conditions at point locations
 fulldata@data <- cbind(fulldata@data, extract(env, fulldata))
 
-#' 
 # Split data set into a training and test data set
 set.seed(2)
 fold <- kfold(fulldata, k = 5)
 traindata <- fulldata[fold != 1, ]
 testdata <- fulldata[fold == 1, ]
 
+############################################################################################################
+#' ==========================================
+#' Evaluate model on test data
+#' ==========================================
 #' We can now use a range of statistical methods to estimate the
 #' probability of species occurrence.
 #' Unfortunately, there are often subtle differences in how the models
@@ -178,18 +179,15 @@ testdata <- fulldata[fold == 1, ]
 
 varnames <- c("bio1", "bio4", "bio5", "bio12", "bio14", "bio15")  #TODO: SELECT ADEQUATE BIOs!!
 
-## Generalized Linear Model
-
-## Generalized additive models
+#' ==========================================
+#' GAM algorithm (Generalized additive models)
+#' ==========================================
 gammodel <- gam(species ~ s(bio1) + s(bio4) + s(bio5) + s(bio12) + s(bio14) + s(bio15),
                 family="binomial", data=traindata)
 summary(gammodel)
 
 plot(gammodel)
 
-# Now we should do model selection: bio14 does not contribute to the fit
-
-# Evaluate model on test data
 # a) Predict to test data
 gamtest <- predict(gammodel, newdata = testdata, type = "response")
 # b) Calculate performance indices
@@ -213,9 +211,9 @@ gammap <- predict(env, gammodel, type = "response")
 plot(gammap)
 plot(study_area, add=TRUE)
 
-
+#' ==========================================
 ## Random forest
-
+#' ==========================================
 # randomForest requires the dependent variable to be a factor
 # if we want to do classification
 rftraindata <- as(traindata, "data.frame")
@@ -245,4 +243,45 @@ rfmap <- predict(env, rfmodel, type = "prob", index = 2)
 par(mfrow=c(1, 1))
 plot(rfmap)
 plot(study_area, add=TRUE)
+
+
+############################################################################
+# prediction
+############################################################################
+
+#load datasets
+#stack all rasters of one scenario and year
+
+rcp2_2050_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp2_6_2050s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp2_2050 <- raster::stack(rcp2_2050_list)
+plot(rcp2_2050[[1]])
+plot(study_area, add=T)
+
+rcp2_2080_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp2_6_2080s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp2_2080 <- raster::stack(rcp2_2080_list)
+plot(rcp2_2080[[1]])
+plot(study_area, add=T)
+
+rcp4_2050_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp4_5_2050s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp4_2050 <- raster::stack(rcp4_2050_list)
+plot(rcp4_2050[[1]])
+plot(study_area, add=T)
+
+rcp4_2080_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp4_5_2080s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp4_2080 <- raster::stack(rcp4_2080_list)
+plot(rcp4_2080[[1]])
+plot(study_area, add=T)
+
+rcp8_2050_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp8_5_2050s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp8_2050 <- raster::stack(rcp8_2050_list)
+plot(rcp8_2050[[1]])
+plot(study_area, add=T)
+
+rcp8_2080_list <- list.files(path="D:\\01_Uni\\02_Master\\MET1_Modeling_Prediction\\RCP\\mpi_esm_lr_rcp8_5_2080s_bio_30s_r1i1p1_b4_asc\\bio_b4", pattern = ".asc", full.names = TRUE)
+rcp8_2080 <- raster::stack(rcp8_2080_list)
+plot(rcp8_2080[[1]])
+plot(study_area, add=T)
+
+#writeRaster(s, "hdf8_EVI.TIF")
+
 

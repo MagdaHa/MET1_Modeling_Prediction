@@ -4,7 +4,7 @@
 
 #' Species distribution models (SDM) using caffea arabica data from GBIF
 #' ============================================
-#' May 2019
+#' May 2019 (24.06.2019)
 #' Magdalena Halbgewachs
 #' R version 3.5.1
 #' Occurrence data source: [gbif](http://www.gbif.org)  
@@ -53,16 +53,10 @@ library(XML)
 
 #' Import data: Environment and species occurrences
 #' ====================================================
-#' Read vector layer with study area
+#' Import shape of the study area (Ethiopia)
 #' ----------------------------------
-#' Notes:
-#' - './' refers to the current working directory, i.e. we 
-#' are specifying as the first argument of readOGR, the dsn, the subdirectory "GIS" within the current working directory
-#' - make sure there is no trailing '/' in the value of the dsn argument, i.e. do **not** use "./GIS/"
-#' - when importing shapefiles, drop the suffix from the layer argument, i.e. do **not** use "africa_dissolved.shp"
-#' 
 
-study_area <- readOGR("./GIS", "africa_dissolved")
+study_area <- readOGR("./ethiopia_shp", "ETH_outline")
 plot(study_area)
 
 #' Download and read bioclim variables
@@ -93,6 +87,7 @@ plot(study_area)
 #' BIO18 | Precipitation of Warmest Quarter
 #' BIO19 | Precipitation of Coldest Quarter
 #' 
+#' getdata(climatevariable)
 
 bio <- raster::getData("worldclim", var = "bio", res = 10)
 
@@ -102,20 +97,16 @@ plot(raster(bio, 1))
 plot(study_area, add=TRUE)
 
 #' Crop to study area extent (with a 5 degree buffer in each direction)
-biocrop <- crop(bio, extent(study_area) + 10)
+biocrop <- crop(bio, extent(study_area) + 3)
 
 #' Plot the first raster layer of the cropped climate data
-plot(raster(biocrop, 1))
+plot(raster(biocrop, 7))
 plot(study_area, add=TRUE)
 
-#' Read occurrence points. If they exist locally, use the local file.
-#' If they do not exist, download from [gbif](http://www.gbif.org) 
-if (file.exists("./GIS/Synceruscaffer/Synceruscaffer.mif")) {
-  species <- readOGR("./GIS/Synceruscaffer/Synceruscaffer.mif", layer = "Synceruscaffer")
-} else {
+#' Read occurrence points
   # Download species location data from gbif
   # species <- gbif("Syncerus", "caffer", ext = extent(bio), sp = TRUE, removeZeros = TRUE)
-  species0 <- gbif('Syncerus', 'caffer')
+  species0 <- gbif('Coffea arabica L.')
   species <- subset(species0,select=c("lat","lon"))
   species <- na.omit(species)
   coordinates(species) <- c("lon", "lat")  # set spatial coordinates
@@ -125,9 +116,9 @@ if (file.exists("./GIS/Synceruscaffer/Synceruscaffer.mif")) {
   proj4string(species) <- CRS("+proj=longlat +datum=WGS84")
   # Save species records in mif-format (preserves full column names)
   #writeOGR(species, "./GIS/Synceruscaffer", "Synceruscaffer", driver="MapInfo File", dataset_options="FORMAT=MIF")
-}
 
 plot(raster(biocrop, 1))
+plot(study_area, add=TRUE)
 plot(species, add = TRUE)
 
 #' Data preprocessing
@@ -144,7 +135,7 @@ cm <- cor(getValues(bio), use = "complete.obs")
 plotcorr(cm, col=ifelse(abs(cm) > 0.7, "red", "grey"))
 
 #' ### Select an uncorrelated subset of environmental variables ###
-env <- subset(biocrop, c("bio1", "bio7", "bio10", "bio14", "bio15"))
+env <- subset(biocrop, c("bio1", "bio4", "bio5", "bio12", "bio14", "bio15"))
 
 #' Sampling of (pseudo-)absence points
 #' ====================================================
@@ -185,12 +176,12 @@ testdata <- fulldata[fold == 1, ]
 #' Unfortunately, there are often subtle differences in how the models
 #' are specified and in which data formats are useable
 
-varnames <- c("bio1", "bio7", "bio10", "bio14", "bio15")
+varnames <- c("bio1", "bio4", "bio5", "bio12", "bio14", "bio15")  #TODO: SELECT ADEQUATE BIOs!!
 
 ## Generalized Linear Model
 
 ## Generalized additive models
-gammodel <- gam(species ~ s(bio1) + s(bio7) + s(bio10) + s(bio14) + s(bio15),
+gammodel <- gam(species ~ s(bio1) + s(bio4) + s(bio5) + s(bio12) + s(bio14) + s(bio15),
                 family="binomial", data=traindata)
 summary(gammodel)
 
@@ -220,6 +211,7 @@ plot(gammodel, pages = 1)
 gammap <- predict(env, gammodel, type = "response")
 
 plot(gammap)
+plot(study_area, add=TRUE)
 
 
 ## Random forest
@@ -230,7 +222,7 @@ rftraindata <- as(traindata, "data.frame")
 rftraindata$species <- factor(rftraindata$species)
 
 # TODO: check proper settings of random forest algorithm
-rfmodel <- randomForest(species ~ bio1 + bio7 + bio10 + bio14 + bio15, data = rftraindata)
+rfmodel <- randomForest(species ~ bio1 + bio4 + bio5 + bio12 + bio14 + bio15, data = rftraindata)
 
 # Evaluate model on test data
 # a) Predict to test data
@@ -252,40 +244,5 @@ for (i in seq_along(varnames)) {
 rfmap <- predict(env, rfmodel, type = "prob", index = 2)
 par(mfrow=c(1, 1))
 plot(rfmap)
-
-#-----------------------------------------------------------------------------------------
-## Maxent
-# The following code assumes that the column with the species information
-# is in the first position
-maxentmodel <- maxent(traindata@data[, -1], traindata[["species"]], 
-                      args = c("nothreshold", 
-                               "nohinge"))
-
-# Model evaluation on test data
-maxenttest <- predict(maxentmodel, testdata)
-val.prob(maxenttest, testdata[["species"]])
-
-# Alternatively, we can use the evaluate function
-maxente <- evaluate(p = maxenttest[testdata[["species"]] == 1],
-                    a = maxenttest[testdata[["species"]] == 0])
-
-# Show variable importance
-plot(maxentmodel)
-
-# Plot response functions
-response(maxentmodel)
-
-# Prediction map
-maxentmap <- predict(maxentmodel, env)
-plot(maxentmap)
-
-# Plot predictions of several methods, using the same
-# colour scheme
-par(mfrow = c(3, 1), mar = c(3, 3, 1, 1))
-brks <- seq(0, 1, by = 0.1)
-arg <- list(at = seq(0, 1, by = 0.2), labels = seq(0, 1, by = 0.2))
-col <- rev(terrain.colors(length(brks) - 1))
-plot(gammap, breaks = brks, col = col, axis.args = arg)
-plot(rfmap, breaks = brks, col = col, axis.args = arg)
-plot(maxentmap, breaks = brks, col = col, axis.args = arg)
+plot(study_area, add=TRUE)
 
